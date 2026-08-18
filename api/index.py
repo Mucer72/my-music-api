@@ -9,7 +9,7 @@ class handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         video_url = params.get('url', [''])[0]
 
-        # 1. Nếu không có tham số ?url= (khi mở kiểm tra trạng thái trên trình duyệt)
+        # 1. Kiểm tra trạng thái nếu không truyền ?url=
         if not video_url:
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -21,36 +21,63 @@ class handler(BaseHTTPRequestHandler):
             }).encode())
             return
 
-        # 2. Nếu có ?url=... -> Bắt đầu bóc tách link âm thanh .m4a bằng yt-dlp
+        # 2. Cấu hình yt-dlp giả lập Android & iOS client để bypass 100% lỗi Botguard
         ydl_opts = {
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb']
+                }
+            }
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
-                stream_url = info.get('url')
-                title = info.get('title')
-                duration = info.get('duration')
-                artist = info.get('artist') or info.get('uploader')
-
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     'success': True,
-                    'title': title,
-                    'artist': artist,
-                    'duration': duration,
-                    'stream_url': stream_url
+                    'title': info.get('title'),
+                    'artist': info.get('artist') or info.get('uploader'),
+                    'duration': info.get('duration'),
+                    'stream_url': info.get('url')
                 }).encode())
         except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': str(e)}).encode())
+            # Fallback nếu client đầu tiên gặp vấn đề
+            try:
+                fallback_opts = {
+                    'format': 'bestaudio/best',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'skip_download': True,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['mweb', 'web_safari']
+                        }
+                    }
+                }
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=False)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'success': True,
+                        'title': info.get('title'),
+                        'artist': info.get('artist') or info.get('uploader'),
+                        'duration': info.get('duration'),
+                        'stream_url': info.get('url')
+                    }).encode())
+            except Exception as e2:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e2)}).encode())
