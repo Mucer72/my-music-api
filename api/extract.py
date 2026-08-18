@@ -5,7 +5,6 @@ import yt_dlp
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Trích xuất tham số ?url=... từ query string
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         video_url = params.get('url', [''])[0]
