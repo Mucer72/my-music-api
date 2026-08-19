@@ -2,11 +2,11 @@ from http.server import BaseHTTPRequestHandler
 import json
 import tempfile
 import os
+import urllib.request
 import yt_dlp
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
-        # Hỗ trợ CORS preflight
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -20,8 +20,8 @@ class handler(BaseHTTPRequestHandler):
         try:
             data = json.loads(body.decode('utf-8'))
             target_url = data.get('url')
-            # Nhận cookies động từ thiết bị gửi lên, fallback sang env var nếu có
             cookie_str = data.get('cookies') or os.environ.get("YOUTUBE_COOKIES", "")
+            download_mode = data.get('download', True) # Mặc định stream audio trực tiếp về App
             
             if not target_url:
                 self.send_response(400)
@@ -35,7 +35,6 @@ class handler(BaseHTTPRequestHandler):
             if cookie_str:
                 tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt")
                 if not cookie_str.startswith("# Netscape"):
-                    # Nếu client gửi chuỗi header 'k1=v1; k2=v2', chuyển sang format Netscape
                     lines = ["# Netscape HTTP Cookie File"]
                     for part in cookie_str.split(";"):
                         if "=" in part:
@@ -60,14 +59,47 @@ class handler(BaseHTTPRequestHandler):
                 stream_url = info.get('url')
                 title = info.get('title')
                 duration = info.get('duration')
+                ext = info.get('ext', 'm4a')
 
-            # Xoá file cookie tạm ngay sau khi dùng xong để bảo mật
+            # Dọn dẹp file cookie tạm
             if cookie_file and os.path.exists(cookie_file):
                 try:
                     os.remove(cookie_file)
                 except Exception:
                     pass
 
+            if not stream_url:
+                raise Exception("Không tìm thấy stream URL từ yt-dlp")
+
+            # Stream Proxy: Vercel tải trực tiếp từ Google Video và pipe về App
+            if download_mode:
+                req = urllib.request.Request(
+                    stream_url,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                        'Referer': 'https://www.youtube.com/'
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=30) as remote_stream:
+                    content_length_remote = remote_stream.headers.get('Content-Length')
+                    content_type_remote = remote_stream.headers.get('Content-Type', 'audio/mp4')
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type_remote)
+                    if content_length_remote:
+                        self.send_header('Content-Length', content_length_remote)
+                    self.send_header('Content-Disposition', f'attachment; filename="audio.{ext}"')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+
+                    while True:
+                        chunk = remote_stream.read(64 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                return
+
+            # Chế độ trả JSON metadata thuần
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -87,12 +119,11 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
 
     def do_GET(self):
-        # Endpoint kiểm tra trạng thái
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(json.dumps({
             'status': 'ok',
-            'message': 'My Music API is running with dynamic cookie support!'
+            'message': 'My Music API is running with direct audio stream proxy support!'
         }).encode('utf-8'))
