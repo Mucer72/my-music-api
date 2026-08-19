@@ -1,0 +1,31 @@
+# fly.toml — Fly.io configuration for yt-dlp audio proxy
+# Thay "my-music-ytdlp" bằng tên app của bạn trên Fly.io
+
+app = "my-music-ytdlp"
+primary_region = "sin"  # Singapore — gần Việt Nam nhất
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks]
+  [checks.alive]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/"
+    port = 8080
+    timeout = "5s"
+    type = "http"
+
