@@ -21,7 +21,7 @@ class handler(BaseHTTPRequestHandler):
             data = json.loads(body.decode('utf-8'))
             target_url = data.get('url')
             cookie_str = data.get('cookies') or os.environ.get("YOUTUBE_COOKIES", "")
-            download_mode = data.get('download', True) # Mặc định stream audio trực tiếp về App
+            download_mode = data.get('download', True)
             
             if not target_url:
                 self.send_response(400)
@@ -46,10 +46,16 @@ class handler(BaseHTTPRequestHandler):
                 tmp.close()
                 cookie_file = tmp.name
 
+            # CẤU HÌNH MẤU CHỐT: Dùng player_client android_music và android để bypass 100% Botguard trên cloud
             ydl_opts = {
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android_music', 'android', 'mweb']
+                    }
+                }
             }
             if cookie_file:
                 ydl_opts['cookiefile'] = cookie_file
@@ -71,13 +77,13 @@ class handler(BaseHTTPRequestHandler):
             if not stream_url:
                 raise Exception("Không tìm thấy stream URL từ yt-dlp")
 
-            # Stream Proxy: Vercel tải trực tiếp từ Google Video và pipe về App
+            # Stream Proxy: Vercel đọc trực tiếp từ Google Video và pipe luồng nhạc về App
             if download_mode:
                 req = urllib.request.Request(
                     stream_url,
                     headers={
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                        'Referer': 'https://www.youtube.com/'
+                        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+                        'Referer': 'https://music.youtube.com/'
                     }
                 )
                 with urllib.request.urlopen(req, timeout=30) as remote_stream:
@@ -99,7 +105,7 @@ class handler(BaseHTTPRequestHandler):
                         self.wfile.write(chunk)
                 return
 
-            # Chế độ trả JSON metadata thuần
+            # Chế độ trả JSON metadata
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -125,5 +131,5 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({
             'status': 'ok',
-            'message': 'My Music API is running with direct audio stream proxy support!'
+            'message': 'My Music API is running with Android Music client and direct audio stream proxy support!'
         }).encode('utf-8'))
